@@ -1,0 +1,53 @@
+# Vibe-Trading 扩展层配置
+# 修改此文件即可切换/新增数据源，无需改代码
+
+providers:
+  tushare_extended:
+    enabled: true
+    priority: 1
+    config:
+      token_env: TUSHARE_TOKEN
+      retry: 3
+      retry_delay: 0.3
+      rate_limit_interval: 0.3  # Tushare 8000 积分：500 次/分钟
+
+  # Phase 2 启用
+  # astockdata:
+  #   enabled: false
+  #   priority: 2
+  #   config:
+  #     em_min_interval: 1.0
+
+# 数据类型 → Provider 优先级（降级链）
+data_type_routing:
+  # Tushare 主力
+  moneyflow:       [tushare_extended]
+  limit_board:     [tushare_extended]
+  dragon_tiger:    [tushare_extended]
+  margin:          [tushare_extended]
+  block_trade:     [tushare_extended]
+  shareholders:    [tushare_extended]
+  adj_factor:      [tushare_extended]
+
+  # Phase 2: a-stock-data 独占
+  # hot_theme:       [astockdata]
+  # research_report: [astockdata]
+  # consensus_eps:   [astockdata]
+  # minute_flow:     [astockdata]
+  # lockup_alert:    [astockdata]
+  # realtime_quote:  [astockdata]
+
+# 数据规范化配置
+normalization:
+  volume_unit: shares       # 成交量目标单位：股
+  amount_unit: cny          # 成交额目标单位：元
+  market_cap_unit: yi_cny   # 市值目标单位：亿元
+  flow_unit: cny            # 资金流目标单位：元
+  price_adjustment: qfq     # 复权方式：前复权（可选）
+
+# 批量拉取配置
+batch_fetch:
+  use_trade_date: true      # 优先按 trade_date 拉取（更高效）
+  max_retries: 3
+  timeout_seconds: 60
+  chunk_size: 100           # 分批拉取的批次大小
