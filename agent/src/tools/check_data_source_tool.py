@@ -2,7 +2,7 @@
 
 Returns the recommended data source and priority chain based on:
 - Whether TUSHARE_TOKEN is configured
-- Current hour (tushare data updates after 20:00)
+- A-share market status (trading hours / after-hours / non-trading day)
 - Market type (a_share, us_equity, hk_equity, crypto, …)
 - Extensions dispatcher availability (moneyflow, dragon_tiger, etc.)
 
@@ -89,6 +89,40 @@ def _check_extensions() -> tuple[bool, list[str]]:
 
 
 # ---------------------------------------------------------------------------
+# A-share market time helpers
+# ---------------------------------------------------------------------------
+
+# A-share regular trading sessions (morning + afternoon)
+_MORNING_OPEN = (9, 30)
+_MORNING_CLOSE = (11, 30)
+_AFTERNOON_OPEN = (13, 0)
+_AFTERNOON_CLOSE = (15, 0)
+
+
+def _is_weekend(now: datetime | None = None) -> bool:
+    """Return True if today is Saturday or Sunday."""
+    if now is None:
+        now = datetime.now()
+    return now.weekday() >= 5
+
+
+def _is_trading_hours(now: datetime | None = None) -> bool:
+    """Return True if current time is within A-share trading sessions.
+
+    Trading sessions: 9:30-11:30 and 13:00-15:00 on weekdays.
+    Uses only clock time — no external API or trading calendar dependency.
+    """
+    if now is None:
+        now = datetime.now()
+    if now.weekday() >= 5:
+        return False
+    t = (now.hour, now.minute)
+    morning = _MORNING_OPEN <= t <= _MORNING_CLOSE
+    afternoon = _AFTERNOON_OPEN <= t <= _AFTERNOON_CLOSE
+    return morning or afternoon
+
+
+# ---------------------------------------------------------------------------
 # Core routing logic
 # ---------------------------------------------------------------------------
 
@@ -119,34 +153,57 @@ def _chain_for_a_share(
     tushare_available: bool,
     mootdx_available: bool,
     hour: int,
+    now: datetime | None = None,
 ) -> tuple[list[str], str]:
     """Return (priority_chain, reason) for A-share market with time awareness.
 
-    The registry chain is the canonical ordering. This function reorders it
-    based on time-of-day and token availability rather than inventing its own
-    chain from scratch, then removes sources unavailable at runtime.
+    Priority logic based on market status:
+      - Weekend / non-trading day → tushare first (historical data most complete)
+      - Trading hours (9:30-15:00) → real-time sources first, tushare last
+      - After close, before 20:00 → real-time sources first (tushare not yet updated)
+      - After 20:00 on trading day → tushare first (daily data updated)
+
+    The registry chain is the canonical ordering (tushare > mootdx > akshare).
+    This function reorders based on market status and token availability.
     """
-    # Step 1: Build policy chain (time-aware ordering)
+    if now is None:
+        now = datetime.now()
+
+    # Step 1: Build policy chain (market-status-aware ordering)
     if not tushare_available:
         # No token: drop tushare from the policy chain
         chain = [s for s in registry_chain if s != "tushare"]
         if not chain:
             chain = ["akshare"]
         reason = "No TUSHARE_TOKEN. " + " > ".join(chain)
-    elif hour >= 20:
-        # After 20:00 tushare data is updated — keep registry order as-is
+    elif _is_weekend(now):
+        # Weekend: tushare historical data is most complete, use it first
         chain = list(registry_chain)
-        reason = (
-            "TUSHARE_TOKEN configured, data updated after 20:00. "
-            "Use tushare first for accuracy."
-        )
-    else:
-        # Before 20:00 tushare is stale — demote it to last
+        reason = "Weekend, tushare historical data recommended."
+    elif _is_trading_hours(now):
+        # Market open: prioritize real-time sources, tushare last (stale)
         chain = [s for s in registry_chain if s != "tushare"]
         chain.append("tushare")
         reason = (
-            f"Current hour is {hour}:00, tushare daily data not updated yet. "
-            "Prioritize real-time sources, tushare as fallback."
+            f"Market is OPEN ({now.hour}:{now.minute:02d}), "
+            "prioritize real-time sources (mootdx/akshare). "
+            "Tushare as fallback (daily data updates after 20:00)."
+        )
+    elif hour >= 20:
+        # After 20:00 on a trading day: tushare daily data is updated
+        chain = list(registry_chain)
+        reason = (
+            "After 20:00 on trading day, tushare daily data updated. "
+            "Use tushare first for accuracy."
+        )
+    else:
+        # After market close but before 20:00: tushare still stale
+        chain = [s for s in registry_chain if s != "tushare"]
+        chain.append("tushare")
+        reason = (
+            f"Market closed ({now.hour}:{now.minute:02d}), "
+            "tushare daily data not updated yet (updates after 20:00). "
+            "Prioritize mootdx/akshare."
         )
 
     # Step 2: Filter out sources unavailable at runtime (e.g. mootdx not installed)
@@ -216,6 +273,7 @@ def check_data_source(market: str = "a_share") -> dict[str, Any]:
     registry_chain = fallback_chains.get(market, ["akshare"])
 
     hour = datetime.now().hour
+    now = datetime.now()
     tushare_available = _check_tushare_token()
     mootdx_available = _check_mootdx()
     extensions_available, extensions_data_types = _check_extensions()
@@ -227,6 +285,7 @@ def check_data_source(market: str = "a_share") -> dict[str, Any]:
             tushare_available=tushare_available,
             mootdx_available=mootdx_available,
             hour=hour,
+            now=now,
         )
     else:
         chain, reason = _chain_for_market(

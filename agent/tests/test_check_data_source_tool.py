@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 from contextlib import contextmanager
@@ -46,12 +46,19 @@ def _patch_env(**kwargs):
 
 
 @contextmanager
-def _patch_hour(hour: int):
-    """Patch datetime.now() to return a specific hour."""
+def _patch_hour(hour: int, weekday: int = 0):
+    """Patch datetime.now() to return a specific hour on a given weekday.
+
+    Args:
+        hour: Hour of day (0-23).
+        weekday: 0=Monday … 6=Sunday.  Defaults to 0 (Monday, a trading day).
+    """
+    # Build a real datetime so .weekday() and tuple comparisons work.
+    # 2026-06-15 is a Monday.
+    base_monday = datetime(2026, 6, 15)
+    target = base_monday.replace(hour=hour, minute=0) + timedelta(days=weekday)
     with patch("src.tools.check_data_source_tool.datetime") as mock_dt:
-        mock_now = MagicMock()
-        mock_now.hour = hour
-        mock_dt.now.return_value = mock_now
+        mock_dt.now.return_value = target
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
         yield
 
@@ -251,6 +258,58 @@ class TestAShareTimeAwarePriority:
              _patch_hour(20), _patch_mootdx(True), _patch_extensions(False):
             r = _call("a_share")
         assert r["recommended_source"] == "tushare"
+
+    # --- New: market-status-aware tests ---
+
+    def test_trading_hours_mootdx_first(self):
+        """During trading hours (10:00 Monday), mootdx > akshare > tushare."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(10), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "mootdx"
+        assert r["priority_chain"][-1] == "tushare"
+        assert "OPEN" in r["reason"]
+
+    def test_afternoon_session_mootdx_first(self):
+        """During afternoon session (14:00 Monday), mootdx first."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(14), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "mootdx"
+        assert r["priority_chain"][-1] == "tushare"
+
+    def test_lunch_break_mootdx_first(self):
+        """During lunch break (12:00 Monday), still mootdx first (tushare not updated)."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(12), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "mootdx"
+        assert r["priority_chain"][-1] == "tushare"
+
+    def test_after_close_before_20_mootdx_first(self):
+        """After close (16:00 Monday), mootdx first (tushare not yet updated)."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(16), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "mootdx"
+        assert r["priority_chain"][-1] == "tushare"
+
+    def test_weekend_tushare_first(self):
+        """On Saturday, tushare first (historical data most complete)."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(10, weekday=5), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "tushare"
+        assert r["priority_chain"][0] == "tushare"
+        assert "Weekend" in r["reason"]
+
+    def test_sunday_tushare_first(self):
+        """On Sunday, tushare first."""
+        with _patch_env(TUSHARE_TOKEN="valid-token"), \
+             _patch_hour(20, weekday=6), _patch_mootdx(True), _patch_extensions(False):
+            r = _call("a_share")
+        assert r["recommended_source"] == "tushare"
+        assert "Weekend" in r["reason"]
 
 
 # ===========================================================================
