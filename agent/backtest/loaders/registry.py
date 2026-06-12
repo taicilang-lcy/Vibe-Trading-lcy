@@ -85,6 +85,8 @@ def _ensure_registered() -> None:
 # ---------------------------------------------------------------------------
 
 FALLBACK_CHAINS: dict[str, list[str]] = {
+    # A-share: tushare (patched to api.tushare.pro, 100% stable behind Clash TUN)
+    #          → mootdx (TCP binary protocol, immune to Clash) → akshare (fragile, last resort)
     "a_share":   ["tushare", "mootdx", "akshare"],
     "us_equity": ["yfinance", "akshare"],
     "hk_equity": ["yfinance", "futu", "akshare"],

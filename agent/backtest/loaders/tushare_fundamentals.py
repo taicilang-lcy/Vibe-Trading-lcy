@@ -115,6 +115,9 @@ class TushareFundamentalProvider:
         if api is None:
             import tushare as ts
 
+            from src.tushare_patch import patch_tushare_sdk_url
+
+            patch_tushare_sdk_url()
             token = os.getenv("TUSHARE_TOKEN", "").strip()
             if token in TUSHARE_TOKEN_PLACEHOLDERS:
                 token = ""

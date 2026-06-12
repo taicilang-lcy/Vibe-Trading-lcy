@@ -32,6 +32,9 @@ class DataLoader:
         """Initialize Tushare pro API."""
         import tushare as ts
 
+        from src.tushare_patch import patch_tushare_sdk_url
+
+        patch_tushare_sdk_url()
         token = os.getenv("TUSHARE_TOKEN", "")
         self.api = ts.pro_api(token)
 

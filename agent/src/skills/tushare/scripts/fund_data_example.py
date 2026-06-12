@@ -8,6 +8,14 @@ import tushare as ts
 import pandas as pd
 import os
 
+# Patch SDK to use official stable domain (see docs/push2-root-cause-analysis-2026-06-11.md)
+try:
+    from src.tushare_patch import patch_tushare_sdk_url
+    patch_tushare_sdk_url()
+except ImportError:
+    from tushare.pro.client import DataApi
+    DataApi._DataApi__http_url = 'http://api.tushare.pro/dataapi'
+
 # 读取环境变量中的token, 或者读取本地记录的token
 token = os.getenv('TUSHARE_TOKEN') or ts.get_token()
 

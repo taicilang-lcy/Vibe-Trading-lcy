@@ -262,6 +262,9 @@ def _load_csi300_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
     except ImportError as exc:
         raise RuntimeError(f"tushare not installed: {exc}") from exc
 
+    from src.tushare_patch import patch_tushare_sdk_url
+
+    patch_tushare_sdk_url()
     pro = ts.pro_api(token)
     sd = start.replace("-", "")
     ed = end.replace("-", "")

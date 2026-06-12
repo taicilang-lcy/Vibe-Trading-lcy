@@ -196,6 +196,10 @@ def _check_tushare() -> CheckResult:
             impact="A-share data unavailable",
         )
 
+    from src.tushare_patch import patch_tushare_sdk_url
+
+    patch_tushare_sdk_url()
+
     return CheckResult(name="Tushare", status="ready", message="token configured", impact="")
 
 
